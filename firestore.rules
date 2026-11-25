@@ -1,0 +1,109 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.token.get('email', '').lower(); }
+    function verified() { return request.auth.token.get('email_verified', false) == true; }
+
+    function isOwner() {
+      return signedIn() && verified()
+        && me() == 'adminnegocio1923@gmail.com'
+        && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+
+    function staffRef() { return /databases/$(database)/documents/staff/$(me()); }
+    function hasStaff() {
+      return signedIn() && verified() && me() != ''
+        && exists(staffRef()) && get(staffRef()).data.active == true;
+    }
+    function role() { return get(staffRef()).data.role; }
+
+    function isDirector()   { return isOwner() || (hasStaff() && role() == 'director'); }
+    function isSecretaria() { return isDirector() || (hasStaff() && role() == 'secretaria'); }
+    function isProfesor()   { return hasStaff() && role() == 'profesor'; }
+    function isStaff()      { return isOwner() || hasStaff(); }
+
+    // Configuración institucional (año, periodos, trámites habilitados, horarios)
+    match /settings/{id} {
+      allow read: if signedIn();
+      allow write: if isDirector();
+    }
+
+    // Personal institucional (director, secretaria, profesor). Nadie modifica al dueño.
+    match /staff/{email} {
+      allow read: if signedIn() && (email == me() || isStaff());
+      allow write: if isDirector() && email != 'adminnegocio1923@gmail.com';
+    }
+
+    // Perfiles de usuarios
+    match /users/{uid} {
+      allow read: if signedIn() && (uid == request.auth.uid || isSecretaria() || isProfesor());
+      allow write: if signedIn() && uid == request.auth.uid && request.resource.data.email == me();
+    }
+
+    // Estudiantes y matrículas
+    match /students/{id} {
+      allow read: if signedIn() && (isStaff() || resource.data.email == me() || resource.data.uid == request.auth.uid);
+      allow write: if isSecretaria();
+    }
+
+    // Áreas curriculares, cursos y asignaciones docentes
+    match /courses/{id} {
+      allow read: if signedIn();
+      allow write: if isDirector();
+    }
+
+    // Módulos del Aula Virtual (LMS)
+    match /modules/{id} {
+      allow read: if signedIn();
+      allow write: if isDirector() || isProfesor();
+    }
+
+    // Tareas y entregas
+    match /tasks/{id} {
+      allow read: if signedIn();
+      allow write: if isDirector() || isProfesor();
+    }
+
+    match /submissions/{id} {
+      allow read: if signedIn() && (isStaff() || resource.data.studentUid == request.auth.uid);
+      allow create, update: if signedIn() && (
+        isProfesor() || isDirector() ||
+        (request.resource.data.studentUid == request.auth.uid && !request.resource.data.keys().hasAny(['grade', 'teacherComment']))
+      );
+      allow delete: if isDirector();
+    }
+
+    // Evaluaciones y calificaciones (0-20)
+    match /grades/{id} {
+      allow read: if signedIn() && (isStaff() || resource.data.studentUid == request.auth.uid);
+      allow write: if isDirector() || (isProfesor() && request.resource.data.score >= 0 && request.resource.data.score <= 20);
+    }
+
+    // Conducta (0-20 independiente, DS N.º 021-2026-MINEDU)
+    match /conduct/{id} {
+      allow read: if signedIn() && (isStaff() || resource.data.studentUid == request.auth.uid);
+      allow write: if isSecretaria() || isProfesor();
+    }
+
+    // Asistencia (sin duplicados por sesión/fecha/estudiante)
+    match /attendance/{id} {
+      allow read: if signedIn() && (isStaff() || resource.data.studentUid == request.auth.uid);
+      allow write: if isSecretaria() || isProfesor();
+    }
+
+    // Horarios publicados
+    match /schedules/{id} {
+      allow read: if signedIn();
+      allow write: if isDirector();
+    }
+
+    // Anuncios institucionales
+    match /announcements/{id} {
+      allow read: if signedIn();
+      allow write: if isSecretaria();
+    }
+  }
+}
