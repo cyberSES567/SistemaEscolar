@@ -1,14 +1,32 @@
 // data.js
-// Capa de datos: Firebase (tiempo real) + Cloudinary (imágenes) o modo demo local.
+// Capa de datos real: Firebase (Auth, Firestore, Storage) en producción
+// y modo desarrollo (?env=dev) separado explícitamente.
 import { CONFIG } from "./config.js";
 
-const CLOUDINARY_CLOUD_NAME = "p6szlpdy";
-const CLOUDINARY_UPLOAD_PRESET = "turnoya_menu";
+export const isDevMode = () => {
+  const params = new URLSearchParams(location.search);
+  if (params.get("env") === "dev") return true;
+  if (params.get("env") === "prod") return false;
+  return CONFIG.env === "development";
+};
 
-export const isCloud = Boolean(CONFIG.firebase && CONFIG.firebase.apiKey);
+export const isCloud = Boolean(CONFIG.firebase && CONFIG.firebase.apiKey) && !isDevMode();
+
+const ALLOWED_MIME = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
+
+export function validateFile(file) {
+  if (!file) throw new Error("No se seleccionó ningún archivo.");
+  if (!ALLOWED_MIME.includes(file.type)) {
+    throw new Error("Formato no permitido. Solo PDF, JPG, PNG o WEBP.");
+  }
+  if (file.size > MAX_FILE_BYTES) {
+    throw new Error("El archivo supera el límite de 5 MB.");
+  }
+}
 
 // ==========================================
-// DATOS INICIALES DEMO (PERÚ 2027 - 28 SECCIONES)
+// DATOS DE DESARROLLO (SOLO ?env=dev)
 // ==========================================
 export function buildSeedData() {
   const sections = [];
@@ -29,17 +47,11 @@ export function buildSeedData() {
     { id: "prof-mat", email: "matematicas@colegio.edu.pe", name: "Prof. Carlos Mendoza", role: "profesor", areaId: "mat", areaName: "Matemática", active: true, availability: [0, 1, 2, 3, 4], maxHours: 24 },
     { id: "prof-com", email: "comunicacion@colegio.edu.pe", name: "Prof. Lucía Fernández", role: "profesor", areaId: "com", areaName: "Comunicación", active: true, availability: [0, 1, 2, 3, 4], maxHours: 24 },
     { id: "prof-cyt", email: "ciencias@colegio.edu.pe", name: "Prof. Jorge Quispe", role: "profesor", areaId: "cyt", areaName: "Ciencia y Tecnología", active: true, availability: [0, 1, 2, 3, 4], maxHours: 22 },
-    { id: "prof-csoc", email: "sociales@colegio.edu.pe", name: "Prof. Elena Vargas", role: "profesor", areaId: "csoc", areaName: "Ciencias Sociales", active: true, availability: [0, 1, 2, 3, 4], maxHours: 20 },
-    { id: "prof-ing", email: "ingles@colegio.edu.pe", name: "Prof. Diana Paredes", role: "profesor", areaId: "ing", areaName: "Inglés como lengua extranjera", active: true, availability: [0, 1, 2, 3, 4], maxHours: 20 },
-    { id: "prof-ept", email: "ept@colegio.edu.pe", name: "Prof. Marco Salazar", role: "profesor", areaId: "ept", areaName: "Educación para el Trabajo (EPT)", active: true, availability: [0, 1, 2, 3, 4], maxHours: 20 },
   ];
 
   const students = [
     { id: "stu-1", uid: "demo-alumno", email: "alumno@colegio.edu.pe", name: "Mateo Silva Rojas", gradeId: "3", section: "A", sectionId: "3A", active: true, code: "2027-03A-01", guardian: "María Rojas (987654321)" },
     { id: "stu-2", uid: "stu-2", email: "valeria.torres@colegio.edu.pe", name: "Valeria Torres Díaz", gradeId: "3", section: "A", sectionId: "3A", active: true, code: "2027-03A-02", guardian: "Luis Torres (987654322)" },
-    { id: "stu-3", uid: "stu-3", email: "diego.castro@colegio.edu.pe", name: "Diego Castro Huamán", gradeId: "3", section: "A", sectionId: "3A", active: true, code: "2027-03A-03", guardian: "Rosa Huamán (987654323)" },
-    { id: "stu-4", uid: "stu-4", email: "camila.ramos@colegio.edu.pe", name: "Camila Ramos Flores", gradeId: "1", section: "B", sectionId: "1B", active: true, code: "2027-01B-01", guardian: "Pedro Ramos (987654324)" },
-    { id: "stu-5", uid: "stu-5", email: "sebastian.vega@colegio.edu.pe", name: "Sebastián Vega León", gradeId: "5", section: "A", sectionId: "5A", active: true, code: "2027-05A-01", guardian: "Ana León (987654325)" },
   ];
 
   const courses = CONFIG.mineduAreas.filter((a) => !a.optional).map((a) => {
@@ -56,180 +68,34 @@ export function buildSeedData() {
     };
   });
 
-  const modules = [
-    {
-      id: "mod-1",
-      courseId: "cur-mat",
-      courseName: "Matemática",
-      sectionId: "3A",
-      unit: "Unidad 1: Álgebra y Funciones",
-      week: 1,
-      title: "Ecuaciones cuadráticas y aplicaciones",
-      description: "Resolución de ecuaciones de segundo grado mediante factorización y fórmula general.",
-      competency: "Resuelve problemas de regularidad, equivalencia y cambio",
-      materials: [{ title: "Guía de ejercicios Semana 1 (PDF)", url: "https://example.com/guia-mat.pdf", type: "pdf" }],
-      published: true,
-      createdAt: Date.now() - 86400000 * 3,
-    },
-    {
-      id: "mod-2",
-      courseId: "cur-com",
-      courseName: "Comunicación",
-      sectionId: "3A",
-      unit: "Unidad 1: Argumentación Crítica",
-      week: 1,
-      title: "El ensayo argumentativo",
-      description: "Estructura, tesis, argumentos y contraargumentos en textos académicos.",
-      competency: "Escribe diversos tipos de textos en lengua materna",
-      materials: [{ title: "Rúbrica de ensayo (PDF)", url: "https://example.com/ensayo.pdf", type: "pdf" }],
-      published: true,
-      createdAt: Date.now() - 86400000 * 2,
-    },
-  ];
-
-  const tasks = [
-    {
-      id: "tsk-1",
-      courseId: "cur-mat",
-      courseName: "Matemática",
-      sectionId: "3A",
-      moduleId: "mod-1",
-      title: "Práctica de Ecuaciones Cuadráticas",
-      instructions: "Resuelve los 10 problemas propuestos en la guía y sube tu procedimiento en PDF o escribe tus respuestas.",
-      dueDate: "2027-03-19",
-      maxScore: 20,
-      createdAt: Date.now() - 86400000 * 2,
-    },
-    {
-      id: "tsk-2",
-      courseId: "cur-com",
-      courseName: "Comunicación",
-      sectionId: "3A",
-      moduleId: "mod-2",
-      title: "Borrador de Ensayo Argumentativo",
-      instructions: "Redacta la introducción y dos argumentos sobre el uso responsable de la IA en la educación.",
-      dueDate: "2027-03-22",
-      maxScore: 20,
-      createdAt: Date.now() - 86400000,
-    },
-  ];
-
-  const grades = [
-    {
-      id: "grd-1",
-      studentUid: "demo-alumno",
-      studentName: "Mateo Silva Rojas",
-      sectionId: "3A",
-      courseId: "cur-mat",
-      courseName: "Matemática",
-      period: "B1",
-      category: "Práctica calificada",
-      evalName: "Práctica Calificada 1",
-      score: 17,
-      weight: 30,
-      comment: "Demuestra un buen dominio de los procedimientos matemáticos. Se recomienda reforzar la resolución de problemas que requieren razonamiento algebraico.",
-      date: "2027-03-10",
-      teacherName: "Prof. Carlos Mendoza",
-    },
-    {
-      id: "grd-2",
-      studentUid: "demo-alumno",
-      studentName: "Mateo Silva Rojas",
-      sectionId: "3A",
-      courseId: "cur-com",
-      courseName: "Comunicación",
-      period: "B1",
-      category: "Exposición",
-      evalName: "Exposición Oral: Oratoria",
-      score: 18,
-      weight: 25,
-      comment: "Excelente claridad expositiva, postura y uso de conectores lógicos.",
-      date: "2027-03-11",
-      teacherName: "Prof. Lucía Fernández",
-    },
-    {
-      id: "grd-3",
-      studentUid: "demo-alumno",
-      studentName: "Mateo Silva Rojas",
-      sectionId: "3A",
-      courseId: "cur-cyt",
-      courseName: "Ciencia y Tecnología",
-      period: "B1",
-      category: "Proyecto",
-      evalName: "Laboratorio: Método Científico",
-      score: 15,
-      weight: 30,
-      comment: "Buen planteamiento de hipótesis; mejorar el registro de variables.",
-      date: "2027-03-12",
-      teacherName: "Prof. Jorge Quispe",
-    },
-  ];
-
-  const attendance = [
-    { id: "att-1", studentUid: "demo-alumno", studentName: "Mateo Silva Rojas", sectionId: "3A", courseId: "cur-mat", date: "2027-03-10", status: "Presente" },
-    { id: "att-2", studentUid: "demo-alumno", studentName: "Mateo Silva Rojas", sectionId: "3A", courseId: "cur-com", date: "2027-03-11", status: "Presente" },
-    { id: "att-3", studentUid: "demo-alumno", studentName: "Mateo Silva Rojas", sectionId: "3A", courseId: "cur-cyt", date: "2027-03-12", status: "Tardanza" },
-  ];
-
-  const conduct = [
-    {
-      id: "cnd-1",
-      studentUid: "demo-alumno",
-      studentName: "Mateo Silva Rojas",
-      sectionId: "3A",
-      period: "B1",
-      score: 18,
-      observation: "Muestra respeto hacia sus compañeros y docentes. Participa activamente en las normas de convivencia.",
-      incidents: [],
-      date: "2027-03-12",
-      by: "Tutoría 3.º A",
-    },
-  ];
-
-  const announcements = [
-    {
-      id: "ann-1",
-      title: "Inicio del Año Escolar 2027 — Escala Vigesimal",
-      body: "Bienvenidos al año académico 2027. Recordamos a nuestra comunidad educativa que las evaluaciones se registran en la escala vigesimal (0 a 20), con nota mínima aprobatoria 11.",
-      author: "Dirección General",
-      date: "2027-03-01",
-      pinned: true,
-    },
-    {
-      id: "ann-2",
-      title: "Reunión de Padres de Familia — I Bimestre",
-      body: "Se convoca a los padres y apoderados de 1.º a 5.º de Secundaria este viernes a las 18:00 h en el auditorio principal.",
-      author: "Secretaría Académica",
-      date: "2027-03-14",
-      pinned: false,
-    },
-  ];
-
   const settings = [
-    { id: "school", tramitesEnabled: false, academicYear: 2027, activePeriod: "B1", schoolName: CONFIG.schoolName }
+    { id: "school", tramitesEnabled: false, academicYear: CONFIG.academicYear, activePeriod: "B1", schoolName: CONFIG.schoolName }
   ];
 
-  return { sections, staff: teachers, students, courses, modules, tasks, grades, attendance, conduct, announcements, settings };
+  return { sections, staff: teachers, students, courses, modules: [], tasks: [], submissions: [], grades: [], attendance: [], conduct: [], announcements: [], schedules: [], tramites: [], auditLogs: [], settings };
 }
 
 // ==========================================
-// IMPLEMENTACIÓN LOCAL (MODO DEMO)
+// IMPLEMENTACIÓN DESARROLLO (SOLO ?env=dev)
 // ==========================================
-const localImpl = {
+const devImpl = {
   _listeners: {},
   _docListeners: {},
   _authCb: null,
-  _user: JSON.parse(localStorage.getItem("portal_user")) || null,
+  _user: JSON.parse(localStorage.getItem("portal_dev_user") || "null"),
 
   _ensureSeed() {
-    if (localStorage.getItem("portal_seeded_2027")) return;
+    if (localStorage.getItem("portal_dev_seeded")) return;
     const seed = buildSeedData();
     Object.entries(seed).forEach(([col, rows]) => {
-      localStorage.setItem("portal_" + col, JSON.stringify(rows));
+      localStorage.setItem("portal_dev_" + col, JSON.stringify(rows));
     });
-    localStorage.setItem("portal_seeded_2027", "1");
+    localStorage.setItem("portal_dev_seeded", "1");
   },
-
+  resetDevData() {
+    Object.keys(localStorage).filter((k) => k.startsWith("portal_dev_")).forEach((k) => localStorage.removeItem(k));
+    this._ensureSeed();
+  },
   onAuth(cb) {
     this._ensureSeed();
     this._authCb = cb;
@@ -247,24 +113,21 @@ const localImpl = {
   },
   async login() { await this.loginDemo("director"); },
   async logout() { this._setUser(null); },
-  async loginEmail(email) { this._setUser({ uid: "demo-email-" + email, email, name: email.split("@")[0], verified: true }); },
-  async register(email, pass, name) { this._setUser({ uid: "demo-email-" + email, email, name: name || email, verified: true }); },
+  async loginEmail(email) { this._setUser({ uid: "dev-" + email, email, name: email.split("@")[0], verified: true }); },
+  async register(email, pass, name) { this._setUser({ uid: "dev-" + email, email, name: name || email, verified: true }); },
   async resetPassword() { return true; },
-  async resendVerification() { return true; },
-  async recheck() { return true; },
-  async call() { return true; },
   _setUser(u) {
     this._user = u;
-    if (u) localStorage.setItem("portal_user", JSON.stringify(u));
-    else localStorage.removeItem("portal_user");
+    if (u) localStorage.setItem("portal_dev_user", JSON.stringify(u));
+    else localStorage.removeItem("portal_dev_user");
     if (this._authCb) this._authCb(u);
   },
   _getStore(col) {
     this._ensureSeed();
-    return JSON.parse(localStorage.getItem("portal_" + col) || "[]");
+    return JSON.parse(localStorage.getItem("portal_dev_" + col) || "[]");
   },
   _setStore(col, rows) {
-    localStorage.setItem("portal_" + col, JSON.stringify(rows));
+    localStorage.setItem("portal_dev_" + col, JSON.stringify(rows));
     if (this._listeners[col]) {
       this._listeners[col].forEach(({ cb, where }) => {
         const filtered = where ? rows.filter((r) => r[where[0]] === where[1]) : [...rows];
@@ -306,7 +169,8 @@ const localImpl = {
   },
   newId() { return "id-" + Math.random().toString(36).substring(2, 9); },
   stamp() { return Date.now(); },
-  async uploadImage(file) {
+  async uploadFile(file) {
+    validateFile(file);
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result);
@@ -316,21 +180,23 @@ const localImpl = {
 };
 
 // ==========================================
-// IMPLEMENTACIÓN FIREBASE (NUBE)
+// IMPLEMENTACIÓN PRODUCCIÓN (FIREBASE REAL)
 // ==========================================
 let cloudImpl = null;
 
 if (isCloud) {
   const base = "https://www.gstatic.com/firebasejs/10.12.2/";
-  const [appM, authM, fs] = await Promise.all([
+  const [appM, authM, fs, stM] = await Promise.all([
     import(base + "firebase-app.js"),
     import(base + "firebase-auth.js"),
     import(base + "firebase-firestore.js"),
+    import(base + "firebase-storage.js"),
   ]);
 
   const app = appM.initializeApp(CONFIG.firebase);
   const auth = authM.getAuth(app);
   const db = fs.getFirestore(app);
+  const storage = stM.getStorage(app);
 
   const fixTs = (v) => {
     if (v && typeof v.toMillis === "function") return v.toMillis();
@@ -361,10 +227,6 @@ if (isCloud) {
       const provider = new authM.GoogleAuthProvider();
       await authM.signInWithPopup(auth, provider);
     },
-    async loginDemo(role) {
-      // En modo nube, las pruebas de roles sin cuenta real usan localImpl
-      return localImpl.loginDemo(role);
-    },
     async logout() { await authM.signOut(auth); },
     async loginEmail(email, pass) { await authM.signInWithEmailAndPassword(auth, email, pass); },
     async register(email, pass, name) {
@@ -373,18 +235,22 @@ if (isCloud) {
       await authM.sendEmailVerification(cred.user);
     },
     async resetPassword(email) { await authM.sendPasswordResetEmail(auth, email); },
-    async resendVerification() { if (auth.currentUser) await authM.sendEmailVerification(auth.currentUser); },
-    async recheck() { if (auth.currentUser) await auth.currentUser.reload(); },
-    watch(col, cb, where) {
+    watch(col, cb, where, onErr) {
       let q = fs.collection(db, col);
       if (where) q = fs.query(q, fs.where(where[0], "==", where[1]));
       return fs.onSnapshot(q, (snap) => {
         cb(snap.docs.map((d) => ({ ...readDoc(d), id: d.id })));
-      }, (err) => console.error("[PortalColegio] watch error:", col, err));
+      }, (err) => {
+        console.error("[PortalColegio] Firestore watch error:", col, err);
+        if (onErr) onErr(err);
+      });
     },
-    watchDoc(col, id, cb) {
+    watchDoc(col, id, cb, onErr) {
       return fs.onSnapshot(fs.doc(db, col, id), (d) => {
         cb(d.exists() ? { ...readDoc(d), id: d.id } : null);
+      }, (err) => {
+        console.error("[PortalColegio] Firestore doc error:", col, id, err);
+        if (onErr) onErr(err);
       });
     },
     async set(col, id, payload) {
@@ -395,42 +261,38 @@ if (isCloud) {
     },
     newId() { return fs.doc(fs.collection(db, "_")).id; },
     stamp() { return fs.serverTimestamp(); },
-    async uploadImage(file) {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, { method: "POST", body: fd });
-      const json = await res.json();
-      if (!json.secure_url) throw new Error("Error subiendo archivo");
-      return json.secure_url;
+    async uploadFile(file, pathPrefix = "uploads") {
+      validateFile(file);
+      const uid = auth.currentUser?.uid || "anon";
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const ref = stM.ref(storage, `${pathPrefix}/${uid}/${Date.now()}_${safeName}`);
+      await stM.uploadBytes(ref, file, { contentType: file.type });
+      return await stM.getDownloadURL(ref);
     },
   };
 }
 
-// Exportamos una interfaz unificada; si el usuario entra en modo demo local, usa localImpl.
+const activeImpl = isCloud ? cloudImpl : devImpl;
+
 export const data = {
-  isDemoSession: () => Boolean(localStorage.getItem("portal_user")),
-  _impl() {
-    if (localStorage.getItem("portal_user")) return localImpl;
-    return isCloud ? cloudImpl : localImpl;
+  isCloud,
+  isDevMode,
+  resetDevData: () => devImpl.resetDevData(),
+  onAuth: (cb) => activeImpl.onAuth(cb),
+  login: () => activeImpl.login(),
+  loginDemo: (role) => {
+    if (isCloud) throw new Error("El modo demo solo está disponible en ?env=dev");
+    return devImpl.loginDemo(role);
   },
-  onAuth(cb) { return this._impl().onAuth(cb); },
-  login() { return (isCloud ? cloudImpl : localImpl).login(); },
-  loginDemo(role) { return localImpl.loginDemo(role); },
-  logout() {
-    localStorage.removeItem("portal_user");
-    return (isCloud ? cloudImpl : localImpl).logout();
-  },
-  loginEmail(e, p) { return (isCloud ? cloudImpl : localImpl).loginEmail(e, p); },
-  register(e, p, n) { return (isCloud ? cloudImpl : localImpl).register(e, p, n); },
-  resetPassword(e) { return (isCloud ? cloudImpl : localImpl).resetPassword(e); },
-  resendVerification() { return (isCloud ? cloudImpl : localImpl).resendVerification(); },
-  recheck() { return (isCloud ? cloudImpl : localImpl).recheck(); },
-  watch(c, cb, w) { return this._impl().watch(c, cb, w); },
-  watchDoc(c, id, cb) { return this._impl().watchDoc(c, id, cb); },
-  set(c, id, d) { return this._impl().set(c, id, d); },
-  remove(c, id) { return this._impl().remove(c, id); },
-  newId() { return this._impl().newId(); },
-  stamp() { return this._impl().stamp(); },
-  uploadImage(f) { return this._impl().uploadImage(f); },
+  logout: () => activeImpl.logout(),
+  loginEmail: (e, p) => activeImpl.loginEmail(e, p),
+  register: (e, p, n) => activeImpl.register(e, p, n),
+  resetPassword: (e) => activeImpl.resetPassword(e),
+  watch: (c, cb, w, onErr) => activeImpl.watch(c, cb, w, onErr),
+  watchDoc: (c, id, cb, onErr) => activeImpl.watchDoc(c, id, cb, onErr),
+  set: (c, id, d) => activeImpl.set(c, id, d),
+  remove: (c, id) => activeImpl.remove(c, id),
+  newId: () => activeImpl.newId(),
+  stamp: () => activeImpl.stamp(),
+  uploadFile: (f, prefix) => activeImpl.uploadFile(f, prefix),
 };

@@ -14,6 +14,9 @@ export const CONFIG = {
   },
 
   ownerEmail: "adminnegocio1923@gmail.com",
+  // Entorno: "production" (Firebase real, sin datos ficticios) o "development" (modo demo local)
+  // Se puede forzar desarrollo en URL con ?env=dev
+  env: "production",
   schoolName: "Colegio San Martín de Porres",
   schoolSlogan: "Excelencia Académica · Secundaria",
   academicYear: 2027,

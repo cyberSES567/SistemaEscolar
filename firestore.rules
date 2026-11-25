@@ -105,5 +105,19 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if isSecretaria();
     }
+
+    // Trámites académicos
+    match /tramites/{id} {
+      allow read: if signedIn() && (isSecretaria() || resource.data.studentUid == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.studentUid == request.auth.uid && request.resource.data.status == 'Pendiente';
+      allow update: if isSecretaria();
+    }
+
+    // Auditoría de operaciones administrativas
+    match /auditLogs/{id} {
+      allow read: if isDirector();
+      allow create: if isSecretaria();
+      allow update, delete: if false;
+    }
   }
 }

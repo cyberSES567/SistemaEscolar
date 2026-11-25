@@ -1,5 +1,5 @@
 import { CONFIG } from "./config.js";
-import { data, isCloud } from "./data.js";
+import { data, isCloud, isDevMode } from "./data.js";
 import { buildTimeSlots, generateSmartSchedule } from "./scheduler.js";
 
 /* ====================== utilidades ====================== */
@@ -18,8 +18,7 @@ function gradeBand(score) {
 
 function peruNow() {
   const now = new Date();
-  const str = now.toLocaleString("en-US", { timeZone: CONFIG.timezone });
-  return new Date(str);
+  return new Date(now.toLocaleString("en-US", { timeZone: CONFIG.timezone }));
 }
 
 function toast(msg, type = "", title = "") {
@@ -34,10 +33,9 @@ function toast(msg, type = "", title = "") {
 /* ====================== estado ====================== */
 const S = {
   user: null,
-  role: null, // alumno | profesor | director | secretaria
+  role: null,
   loading: true,
   tab: null,
-  // colecciones
   sections: [],
   staff: [],
   students: [],
@@ -50,8 +48,9 @@ const S = {
   conduct: [],
   announcements: [],
   schedules: [],
+  tramites: [],
+  auditLogs: [],
   schoolSettings: { tramitesEnabled: false, academicYear: CONFIG.academicYear, activePeriod: "B1" },
-  // filtros UI
   periodFilter: "B1",
   selectedCourse: "",
   selectedSection: "3A",
@@ -59,6 +58,15 @@ const S = {
 };
 
 let unsubs = [];
+let rafId = null;
+function scheduleRender() {
+  if (rafId) return;
+  rafId = requestAnimationFrame(() => {
+    rafId = null;
+    $app.innerHTML = view();
+  });
+}
+
 function stopWatchers() {
   unsubs.forEach((u) => { try { u(); } catch {} });
   unsubs = [];
@@ -67,8 +75,8 @@ function stopWatchers() {
 const NAV = {
   alumno: [["inicio", "Inicio"], ["aula", "Aula Virtual"], ["horario", "Horario"], ["notas", "Notas"], ["tramites", "Trámites"]],
   profesor: [["inicio", "Inicio"], ["cursos", "Módulos"], ["tareas", "Tareas"], ["notas", "Notas"], ["asistencia", "Asistencia"], ["reportes", "Reportes"]],
-  director: [["inicio", "Dashboard"], ["academico", "Académico"], ["horarios", "Horarios (28)"], ["personas", "Personas"]],
-  secretaria: [["inicio", "Inicio"], ["estudiantes", "Matrículas"], ["conducta", "Conducta"], ["comunicados", "Comunicados"]],
+  director: [["inicio", "Dashboard"], ["academico", "Académico"], ["horarios", "Horarios (28)"], ["personas", "Personas"], ["auditoria", "Auditoría"]],
+  secretaria: [["inicio", "Inicio"], ["estudiantes", "Matrículas"], ["conducta", "Conducta"], ["tramites", "Trámites"], ["comunicados", "Comunicados"]],
 };
 
 const ROLE_LABEL = {
@@ -78,37 +86,65 @@ const ROLE_LABEL = {
   secretaria: "Dirección / Secretaría",
 };
 
-function startWatchers() {
-  stopWatchers();
-  const cols = [
-    ["sections", "sections"],
-    ["staff", "staff"],
-    ["students", "students"],
-    ["courses", "courses"],
-    ["modules", "modules"],
-    ["tasks", "tasks"],
-    ["submissions", "submissions"],
-    ["grades", "grades"],
-    ["attendance", "attendance"],
-    ["conduct", "conduct"],
-    ["announcements", "announcements"],
-    ["schedules", "schedules"],
-  ];
-  cols.forEach(([col, key]) => {
-    unsubs.push(data.watch(col, (rows) => { S[key] = rows; render(); }));
-  });
-  unsubs.push(data.watchDoc("settings", "school", (doc) => {
-    if (doc) S.schoolSettings = { ...S.schoolSettings, ...doc };
-    render();
-  }));
+function onWatchErr(col) {
+  return (err) => toast(`Error cargando ${col}: ${err.message || "Sin permisos"}`, "bad");
 }
 
-function resolveRole(u) {
+function startWatchers(role, u) {
+  stopWatchers();
+  const w = (col, key, where = null) => {
+    unsubs.push(data.watch(col, (rows) => { S[key] = rows; scheduleRender(); }, where, onWatchErr(col)));
+  };
+
+  unsubs.push(data.watchDoc("settings", "school", (doc) => {
+    if (doc) S.schoolSettings = { ...S.schoolSettings, ...doc };
+    scheduleRender();
+  }, onWatchErr("settings")));
+
+  // Colecciones comunes de lectura institucional
+  w("sections", "sections");
+  w("courses", "courses");
+  w("announcements", "announcements");
+  w("schedules", "schedules");
+
+  if (role === "alumno") {
+    // Consultas estrictamente filtradas al alumno autenticado
+    w("students", "students", ["uid", u.uid]);
+    w("modules", "modules");
+    w("tasks", "tasks");
+    w("submissions", "submissions", ["studentUid", u.uid]);
+    w("grades", "grades", ["studentUid", u.uid]);
+    w("attendance", "attendance", ["studentUid", u.uid]);
+    w("conduct", "conduct", ["studentUid", u.uid]);
+    w("tramites", "tramites", ["studentUid", u.uid]);
+  } else if (role === "profesor") {
+    w("students", "students");
+    w("modules", "modules");
+    w("tasks", "tasks");
+    w("submissions", "submissions");
+    w("grades", "grades");
+    w("attendance", "attendance");
+  } else if (role === "secretaria") {
+    w("students", "students");
+    w("conduct", "conduct");
+    w("tramites", "tramites");
+    w("staff", "staff");
+  } else if (role === "director") {
+    w("staff", "staff");
+    w("students", "students");
+    w("grades", "grades");
+    w("attendance", "attendance");
+    w("tramites", "tramites");
+    w("auditLogs", "auditLogs");
+  }
+}
+
+function resolveRole(u, staffList) {
   if (!u) return null;
-  if (u.demoRole) return u.demoRole;
+  if (isDevMode() && u.demoRole) return u.demoRole;
   const email = (u.email || "").toLowerCase();
   if (email === CONFIG.ownerEmail.toLowerCase()) return "director";
-  const st = S.staff.find((s) => (s.email || "").toLowerCase() === email && s.active !== false);
+  const st = staffList.find((s) => (s.email || "").toLowerCase() === email && s.active !== false);
   if (st) return st.role;
   return "alumno";
 }
@@ -119,37 +155,80 @@ data.onAuth((u) => {
     stopWatchers();
     S.role = null;
     S.loading = false;
-    render();
+    scheduleRender();
     return;
   }
   S.loading = true;
-  startWatchers();
-  setTimeout(() => {
-    S.role = resolveRole(u);
-    if (!S.tab || !NAV[S.role]?.some(([k]) => k === S.tab)) {
-      S.tab = NAV[S.role]?.[0]?.[0] || "inicio";
-    }
+  scheduleRender();
+
+  if (isDevMode() && u.demoRole) {
+    S.role = u.demoRole;
+    S.tab = NAV[S.role]?.[0]?.[0] || "inicio";
+    startWatchers(S.role, u);
     S.loading = false;
-    render();
-  }, 150);
+    scheduleRender();
+    return;
+  }
+
+  // En producción, consultamos el documento de staff del usuario para resolver su rol de forma confiable
+  const email = (u.email || "").toLowerCase();
+  if (email === CONFIG.ownerEmail.toLowerCase()) {
+    S.role = "director";
+    S.tab = NAV.director[0][0];
+    startWatchers("director", u);
+    S.loading = false;
+    scheduleRender();
+    return;
+  }
+
+  const unsubRole = data.watchDoc("staff", email || "_", (doc) => {
+    unsubRole();
+    const role = doc && doc.active !== false ? doc.role : "alumno";
+    S.role = NAV[role] ? role : "alumno";
+    S.tab = NAV[S.role][0][0];
+    startWatchers(S.role, u);
+    S.loading = false;
+    scheduleRender();
+  }, () => {
+    S.role = "alumno";
+    S.tab = "inicio";
+    startWatchers("alumno", u);
+    S.loading = false;
+    scheduleRender();
+  });
 });
+
+async function logAudit(action, target) {
+  try {
+    await data.set("auditLogs", data.newId(), {
+      actorEmail: S.user?.email || "sistema",
+      actorRole: S.role,
+      action,
+      target,
+      at: data.stamp(),
+      dateStr: new Date().toLocaleString("es-PE", { timeZone: CONFIG.timezone }),
+    });
+  } catch (e) {
+    console.warn("Audit log error:", e);
+  }
+}
 
 /* ====================== helpers de dominio ====================== */
 function currentStudent() {
-  return S.students.find((s) => s.uid === S.user?.uid || s.email === S.user?.email) || S.students[0] || {
-    uid: S.user?.uid, name: S.user?.name || "Estudiante", gradeId: "3", section: "A", sectionId: "3A", code: "2027-03A-01"
+  return S.students.find((s) => s.uid === S.user?.uid || s.email === S.user?.email) || {
+    uid: S.user?.uid, name: S.user?.name || "Estudiante", gradeId: "—", section: "—", sectionId: "Sin matrícula", code: "Pendiente"
   };
 }
 
 function publishedSchedule() {
-  return S.schedules.find((s) => s.id === "published") || S.schedules[0] || null;
+  return S.schedules.find((s) => s.id === "published") || null;
 }
 
 function currentClassForSection(sectionId) {
   const sched = publishedSchedule();
   if (!sched || !sched.entries) return { status: "none", msg: "Horario aún no publicado por Dirección." };
   const p = peruNow();
-  const dayIdx = p.getDay() - 1; // 0=Lunes .. 4=Viernes
+  const dayIdx = p.getDay() - 1;
   if (dayIdx < 0 || dayIdx > 4) return { status: "none", msg: "Hoy no hay clases programadas (fin de semana)." };
 
   const hhmm = `${String(p.getHours()).padStart(2, "0")}:${String(p.getMinutes()).padStart(2, "0")}`;
@@ -163,25 +242,31 @@ function currentClassForSection(sectionId) {
 
 /* ====================== vistas comunes ====================== */
 function loginView() {
-  return `<header class="top"><div class="brand">Portal Colegio<small>${esc(CONFIG.schoolName)} · ${CONFIG.academicYear}</small></div></header>
+  const dev = isDevMode();
+  return `<header class="top">
+    <div class="brand">Portal Colegio<small>${esc(CONFIG.schoolName)} · ${CONFIG.academicYear}</small></div>
+    <div class="sp"></div>
+    <span class="chip ${dev ? "warn" : "ok"}">${dev ? "Entorno Desarrollo" : "Producción Firebase"}</span>
+  </header>
   <section class="hero">
     <span class="pill">SIGE Perú 2027 · Escala Vigesimal (0–20)</span>
     <h1>Gestión Educativa Integral para Secundaria.</h1>
-    <p>Plataforma académica y administrativa conectada en tiempo real: Aula Virtual, Libreta 2027, Asistencia, Conducta y Generador Inteligente de Horarios para las 28 secciones.</p>
+    <p>Plataforma académica y administrativa conectada en tiempo real con Firebase Authentication, Cloud Firestore y Firebase Storage.</p>
 
-    <div class="card" style="max-width:680px;margin:0 auto 22px;text-align:left">
-      <h3 style="margin-bottom:8px">Acceso rápido de demostración (4 Roles)</h3>
-      <p class="muted" style="margin-bottom:12px">Explora el sistema completo con datos reales de prueba para el año escolar 2027:</p>
-      <div class="row">
-        <button class="btn" data-act="demo" data-role="alumno">🎓 Alumno</button>
-        <button class="btn ghost" data-act="demo" data-role="profesor">👨‍🏫 Profesor</button>
-        <button class="btn ghost" data-act="demo" data-role="director">🏛️ Director</button>
-        <button class="btn ghost" data-act="demo" data-role="secretaria">🗂️ Secretaría</button>
+    ${dev ? `
+      <div class="card" style="max-width:680px;margin:0 auto 22px;text-align:left">
+        <h3 style="margin-bottom:8px">Acceso rápido de desarrollo (?env=dev)</h3>
+        <div class="row">
+          <button class="btn" data-act="demo" data-role="alumno">🎓 Alumno</button>
+          <button class="btn ghost" data-act="demo" data-role="profesor">👨‍🏫 Profesor</button>
+          <button class="btn ghost" data-act="demo" data-role="director">🏛️ Director</button>
+          <button class="btn ghost" data-act="demo" data-role="secretaria">🗂️ Secretaría</button>
+        </div>
       </div>
-    </div>
+    ` : ""}
 
     <div class="card" style="max-width:440px;margin:0 auto;text-align:left">
-      <h3 style="margin-bottom:10px">Acceso institucional (Firebase Auth)</h3>
+      <h3 style="margin-bottom:10px">Acceso institucional</h3>
       ${isCloud ? `<button class="btn big gbtn full" data-act="login" style="margin-bottom:12px"><i>G</i> Continuar con Google</button>` : ""}
       <form data-form="emailAuth">
         <label class="lbl">Correo institucional<input name="email" type="email" required placeholder="usuario@colegio.edu.pe"></label>
@@ -191,6 +276,7 @@ function loginView() {
           <button class="btn ghost full" type="submit" value="register">Registrarme</button>
         </div>
       </form>
+      <button class="btn ghost full sm" type="button" data-act="resetPass" style="margin-top:10px">¿Olvidaste tu contraseña?</button>
     </div>
   </section>`;
 }
@@ -225,10 +311,8 @@ function alumnoView() {
 
 function alumnoInicio() {
   const stu = currentStudent();
-  const myGrades = S.grades.filter((g) => g.studentUid === stu.uid || g.sectionId === stu.sectionId);
-  const myAtt = S.attendance.filter((a) => a.studentUid === stu.uid);
-  const pres = myAtt.filter((a) => a.status === "Presente").length;
-  const attPct = myAtt.length ? Math.round((pres / myAtt.length) * 100) : 100;
+  const pres = S.attendance.filter((a) => a.status === "Presente").length;
+  const attPct = S.attendance.length ? Math.round((pres / S.attendance.length) * 100) : 100;
   const clsNow = currentClassForSection(stu.sectionId);
   const p = peruNow();
   const fechaStr = p.toLocaleDateString("es-PE", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -238,11 +322,11 @@ function alumnoInicio() {
       <div class="card">
         <span class="chip ok">${esc(stu.gradeId)}.º Secundaria · Sección ${esc(stu.section)}</span>
         <h2 style="margin-top:8px">¡Bienvenido, ${esc(stu.name)}!</h2>
-        <p class="muted" style="text-transform:capitalize">${esc(fechaStr)} · Código: ${esc(stu.code || "2027")}</p>
+        <p class="muted" style="text-transform:capitalize">${esc(fechaStr)} · Código: ${esc(stu.code)}</p>
         <div class="grid4" style="margin-top:14px">
-          <div class="kpi"><span class="muted">Promedio General</span><b>${avg(myGrades.map((g) => g.score)) ?? "—"} / 20</b></div>
+          <div class="kpi"><span class="muted">Promedio General</span><b>${avg(S.grades.map((g) => g.score)) ?? "—"} / 20</b></div>
           <div class="kpi"><span class="muted">Asistencia</span><b>${attPct}%</b></div>
-          <div class="kpi"><span class="muted">Tareas activas</span><b>${S.tasks.filter((t) => t.sectionId === stu.sectionId).length}</b></div>
+          <div class="kpi"><span class="muted">Tareas sección</span><b>${S.tasks.filter((t) => t.sectionId === stu.sectionId).length}</b></div>
         </div>
       </div>
 
@@ -264,7 +348,7 @@ function alumnoInicio() {
 
     <h3 class="sec">Últimas calificaciones (Escala 0–20)</h3>
     <div class="stack">
-      ${myGrades.slice(0, 4).map((g) => {
+      ${S.grades.slice(0, 5).map((g) => {
         const b = gradeBand(g.score);
         return `<div class="card"><div class="row" style="align-items:center"><div><b>${esc(g.courseName)}</b> · <span class="muted">${esc(g.evalName)}</span></div><div style="text-align:right"><span class="chip ${b.cls}">${g.score}/20 · ${b.label}</span></div></div>${g.comment ? `<p class="muted" style="margin-top:6px">💬 "${esc(g.comment)}"</p>` : ""}</div>`;
       }).join("") || `<div class="empty">Aún no hay calificaciones registradas.</div>`}
@@ -276,13 +360,12 @@ function alumnoAula() {
   const myCourses = S.courses;
   const activeCourse = S.selectedCourse || myCourses[0]?.id || "";
   const course = myCourses.find((c) => c.id === activeCourse);
-  const mods = S.modules.filter((m) => m.courseId === activeCourse && m.published !== false);
-  const tsks = S.tasks.filter((t) => t.courseId === activeCourse);
+  const mods = S.modules.filter((m) => m.courseId === activeCourse && m.sectionId === stu.sectionId && m.published !== false);
+  const tsks = S.tasks.filter((t) => t.courseId === activeCourse && t.sectionId === stu.sectionId);
 
   return `
     <h2>Aula Virtual (LMS) — ${esc(stu.sectionId)}</h2>
-    <p class="muted" style="margin-bottom:12px">Selecciona un curso para ver sus unidades, módulos, materiales y tareas.</p>
-    <div class="row" style="margin-bottom:16px">
+    <div class="row" style="margin:12px 0">
       ${myCourses.map((c) => `<button class="btn sm ${c.id === activeCourse ? "" : "ghost"}" data-act="pickCourse" data-id="${esc(c.id)}">${esc(c.name)}</button>`).join("")}
     </div>
     ${course ? `
@@ -296,9 +379,7 @@ function alumnoAula() {
           <span class="chip blue">${esc(m.unit)} · Semana ${m.week}</span>
           <h3 style="margin-top:6px">${esc(m.title)}</h3>
           <p class="muted">${esc(m.description)}</p>
-          ${m.competency ? `<p class="muted" style="margin-top:4px;font-size:.78rem">🎯 Competencia: ${esc(m.competency)}</p>` : ""}
-          ${(m.materials || []).map((mat) => `<a class="btn sm ghost" style="margin-top:8px" href="${esc(mat.url)}" target="_blank">📄 ${esc(mat.title)}</a>`).join(" ")}
-        </div>`).join("") || `<div class="empty">Aún no hay módulos publicados en este curso.</div>`}
+        </div>`).join("") || `<div class="empty">Aún no hay módulos publicados para tu sección.</div>`}
       </div>
       <h3 class="sec">Tareas del curso</h3>
       <div class="stack">
@@ -325,8 +406,7 @@ function alumnoHorario() {
 
   return `
     <h2>Horario Semanal — Sección ${esc(stu.sectionId)}</h2>
-    <p class="muted" style="margin-bottom:12px">Horario oficial publicado por Dirección (${days.length} días).</p>
-    <div class="card tbl-wrap">
+    <div class="card tbl-wrap" style="margin-top:12px">
       <table>
         <thead><tr><th>Hora</th>${days.map((d) => `<th>${d}</th>`).join("")}</tr></thead>
         <tbody>
@@ -343,10 +423,7 @@ function alumnoHorario() {
 }
 
 function alumnoNotas() {
-  const stu = currentStudent();
-  const myGrades = S.grades.filter((g) => (g.studentUid === stu.uid || g.sectionId === stu.sectionId) && g.period === S.periodFilter);
-  const myConduct = S.conduct.filter((c) => c.studentUid === stu.uid);
-
+  const myGrades = S.grades.filter((g) => g.period === S.periodFilter);
   return `
     <div class="row" style="align-items:center;margin-bottom:12px">
       <h2>Libreta de Notas 2027 (Escala 0–20)</h2>
@@ -363,7 +440,7 @@ function alumnoNotas() {
             const b = gradeBand(g.score);
             return `<tr>
               <td><b>${esc(g.courseName)}</b></td>
-              <td>${esc(g.evalName)} <span class="muted">(${esc(g.category)})</span></td>
+              <td>${esc(g.evalName)}</td>
               <td><b>${g.score} / 20</b></td>
               <td><span class="chip ${b.cls}">${b.label}</span></td>
               <td class="muted">${esc(g.comment || "—")}</td>
@@ -373,9 +450,9 @@ function alumnoNotas() {
       </table>
     </div>
 
-    <h3 class="sec">Registro Independiente de Conducta (DS N.º 021-2026-MINEDU)</h3>
+    <h3 class="sec">Registro Independiente de Conducta</h3>
     <div class="stack">
-      ${myConduct.map((c) => {
+      ${S.conduct.map((c) => {
         const b = gradeBand(c.score);
         return `<div class="card"><div class="row" style="align-items:center"><b>Conducta · ${esc(c.period)}</b><span class="chip ${b.cls}">${c.score}/20</span></div><p class="muted" style="margin-top:6px">${esc(c.observation)}</p></div>`;
       }).join("") || `<div class="empty">Sin registros de conducta.</div>`}
@@ -387,14 +464,19 @@ function alumnoTramites() {
     return `<h2>Trámites Académicos</h2>
     <div class="empty" style="margin-top:16px">
       <h3>🔒 Módulo temporalmente deshabilitado</h3>
-      <p class="muted" style="margin-top:8px">Este servicio institucional aún no está habilitado. Dirección habilitará los trámites en línea próximamente.</p>
+      <p class="muted" style="margin-top:8px">Este servicio institucional aún no está habilitado por Dirección.</p>
     </div>`;
   }
   return `<h2>Trámites Académicos</h2>
-  <div class="card" style="margin-top:12px">
-    <h3>Solicitud de Constancias y Certificados</h3>
-    <p class="muted">Módulo habilitado por Dirección. Puedes solicitar constancia de estudios o certificado oficial.</p>
-    <button class="btn sm" style="margin-top:10px" data-act="reqTramite">Solicitar Constancia de Estudios</button>
+  <div class="card" style="margin:12px 0">
+    <form data-form="reqTramite" class="row" style="align-items:end">
+      <label class="lbl">Tipo de trámite<select name="type"><option>Constancia de Estudios</option><option>Certificado Oficial de Notas</option><option>Rectificación de Datos</option></select></label>
+      <label class="lbl">Detalle<input name="detail" required placeholder="Motivo o destinatario"></label>
+      <button class="btn" type="submit">Solicitar</button>
+    </form>
+  </div>
+  <div class="stack">
+    ${S.tramites.map((t) => `<div class="card"><b>${esc(t.type)}</b> · <span class="chip">${esc(t.status)}</span><p class="muted">${esc(t.detail)}</p></div>`).join("")}
   </div>`;
 }
 
@@ -411,19 +493,14 @@ function profesorView() {
 }
 
 function profInicio() {
-  const myCourses = S.courses;
   const pendingSubs = S.submissions.filter((s) => s.grade == null).length;
   return `
     <h2>Panel Docente — ${esc(S.user.name)}</h2>
     <div class="grid4" style="margin:14px 0">
-      <div class="card kpi"><span class="muted">Cursos asignados</span><b>${myCourses.length}</b></div>
-      <div class="card kpi"><span class="muted">Módulos publicados</span><b>${S.modules.length}</b></div>
+      <div class="card kpi"><span class="muted">Cursos</span><b>${S.courses.length}</b></div>
+      <div class="card kpi"><span class="muted">Módulos</span><b>${S.modules.length}</b></div>
       <div class="card kpi"><span class="muted">Entregas por calificar</span><b>${pendingSubs}</b></div>
-      <div class="card kpi"><span class="muted">Secciones activas</span><b>${S.sections.length}</b></div>
-    </div>
-    <h3 class="sec">Mis cursos</h3>
-    <div class="grid2">
-      ${myCourses.slice(0, 4).map((c) => `<div class="card"><b>${esc(c.name)}</b><p class="muted">${c.hoursPerWeek} h/semana · ${c.competencies?.length || 0} competencias MINEDU</p></div>`).join("")}
+      <div class="card kpi"><span class="muted">Secciones</span><b>${S.sections.length}</b></div>
     </div>`;
 }
 
@@ -434,12 +511,7 @@ function profCursos() {
       <button class="btn sm" data-act="openNewMod" style="max-width:200px">+ Nuevo Módulo</button>
     </div>
     <div class="stack">
-      ${S.modules.map((m) => `<div class="card">
-        <span class="chip blue">${esc(m.courseName)} · ${esc(m.sectionId)} · Semana ${m.week}</span>
-        <h3 style="margin-top:6px">${esc(m.title)}</h3>
-        <p class="muted">${esc(m.description)}</p>
-        <p class="muted" style="font-size:.78rem;margin-top:4px">🎯 ${esc(m.competency || "Competencia MINEDU")}</p>
-      </div>`).join("") || `<div class="empty">Sin módulos creados.</div>`}
+      ${S.modules.map((m) => `<div class="card"><span class="chip blue">${esc(m.courseName)} · ${esc(m.sectionId)} · Semana ${m.week}</span><h3 style="margin-top:6px">${esc(m.title)}</h3><p class="muted">${esc(m.description)}</p></div>`).join("") || `<div class="empty">Sin módulos creados.</div>`}
     </div>`;
 }
 
@@ -455,16 +527,16 @@ function profTareas() {
     <h3 class="sec">Seguimiento de Entregas</h3>
     <div class="card tbl-wrap">
       <table>
-        <thead><tr><th>Alumno</th><th>Tarea</th><th>Respuesta / Archivo</th><th>Estado</th><th>Nota (0–20)</th><th>Acción</th></tr></thead>
+        <thead><tr><th>Alumno</th><th>Tarea</th><th>Entrega</th><th>Estado</th><th>Nota (0–20)</th><th>Acción</th></tr></thead>
         <tbody>
           ${S.submissions.map((s) => `<tr>
             <td>${esc(s.studentName)}</td>
             <td>${esc(s.taskTitle)}</td>
-            <td class="muted">${esc(s.answer || "Archivo adjunto")}</td>
+            <td>${s.fileUrl ? `<a class="btn sm ghost" href="${esc(s.fileUrl)}" target="_blank">📎 Ver archivo</a>` : esc(s.answer || "—")}</td>
             <td><span class="chip ${s.grade != null ? "ok" : "warn"}">${esc(s.status)}</span></td>
             <td><b>${s.grade != null ? `${s.grade}/20` : "—"}</b></td>
             <td><button class="btn sm" data-act="gradeSub" data-id="${esc(s.id)}">Calificar</button></td>
-          </tr>`).join("") || `<tr><td colspan="6" class="muted">Aún no hay entregas de alumnos.</td></tr>`}
+          </tr>`).join("") || `<tr><td colspan="6" class="muted">Aún no hay entregas.</td></tr>`}
         </tbody>
       </table>
     </div>`;
@@ -488,9 +560,7 @@ function profNotas() {
     <div class="card tbl-wrap">
       <table>
         <thead><tr><th>Alumno</th><th>Curso</th><th>Evaluación</th><th>Nota</th><th>Comentario</th></tr></thead>
-        <tbody>
-          ${S.grades.map((g) => `<tr><td>${esc(g.studentName)}</td><td>${esc(g.courseName)}</td><td>${esc(g.evalName)}</td><td><b>${g.score}/20</b></td><td class="muted">${esc(g.comment || "—")}</td></tr>`).join("")}
-        </tbody>
+        <tbody>${S.grades.map((g) => `<tr><td>${esc(g.studentName)}</td><td>${esc(g.courseName)}</td><td>${esc(g.evalName)}</td><td><b>${g.score}/20</b></td><td class="muted">${esc(g.comment || "—")}</td></tr>`).join("")}</tbody>
       </table>
     </div>`;
 }
@@ -521,9 +591,8 @@ function profReportes() {
   return `
     <h2>Reportes Académicos</h2>
     <div class="card" style="margin-top:12px">
-      <p class="muted" style="margin-bottom:12px">Exporta las calificaciones y asistencia en formato compatible con Excel (CSV) o imprime en PDF.</p>
       <div class="row" style="max-width:420px">
-        <button class="btn" data-act="exportCsv">📥 Exportar Notas (Excel/CSV)</button>
+        <button class="btn" data-act="exportCsv">📥 Exportar Notas (CSV/Excel)</button>
         <button class="btn ghost" onclick="window.print()">🖨️ Imprimir / PDF</button>
       </div>
     </div>`;
@@ -536,6 +605,7 @@ function directorView() {
     academico: dirAcademico,
     horarios: dirHorarios,
     personas: dirPersonas,
+    auditoria: dirAuditoria,
   }[S.tab] || dirInicio)();
 }
 
@@ -550,19 +620,6 @@ function dirInicio() {
       <div class="card kpi"><span class="muted">Secciones (1.º–5.º)</span><b>${S.sections.length}</b></div>
       <div class="card kpi"><span class="muted">Promedio General</span><b>${avgAll} / 20</b></div>
     </div>
-
-    <div class="card" style="margin-bottom:16px">
-      <h3>Rendimiento por Área Curricular (MINEDU 2027)</h3>
-      <div class="stack" style="margin-top:12px">
-        ${S.courses.slice(0, 6).map((c) => {
-          const cg = S.grades.filter((g) => g.courseId === c.id).map((g) => g.score);
-          const a = avg(cg) ?? 15;
-          const pct = Math.round((a / 20) * 100);
-          return `<div><div class="row"><span>${esc(c.name)}</span><span style="text-align:right"><b>${a}/20</b></span></div><div class="prog"><span style="width:${pct}%"></span></div></div>`;
-        }).join("")}
-      </div>
-    </div>
-
     <div class="card">
       <h3>Estado del Horario Institucional</h3>
       <p class="muted">${sched ? `Publicado · ${sched.stats?.totalAssignedBlocks || 0} bloques asignados en ${sched.stats?.totalSections || 28} secciones.` : "Aún no se ha generado el horario."}</p>
@@ -584,14 +641,10 @@ function dirAcademico() {
         </button>
       </div>
     </div>
-
-    <h3 class="sec">11 Áreas Curriculares Oficiales (MINEDU)</h3>
     <div class="card tbl-wrap">
       <table>
         <thead><tr><th>Área Curricular</th><th>Horas/Sem</th><th>Docente</th><th>Competencias</th></tr></thead>
-        <tbody>
-          ${S.courses.map((c) => `<tr><td><b>${esc(c.name)}</b></td><td>${c.hoursPerWeek} h</td><td>${esc(c.teacherName)}</td><td class="muted">${c.competencies?.length || 0} competencias</td></tr>`).join("")}
-        </tbody>
+        <tbody>${S.courses.map((c) => `<tr><td><b>${esc(c.name)}</b></td><td>${c.hoursPerWeek} h</td><td>${esc(c.teacherName)}</td><td class="muted">${c.competencies?.length || 0} competencias</td></tr>`).join("")}</tbody>
       </table>
     </div>`;
 }
@@ -602,11 +655,9 @@ function dirHorarios() {
   return `
     <h2>Generador Inteligente de Horarios (28 Secciones)</h2>
     <div class="card" style="margin:12px 0">
-      <p class="muted" style="margin-bottom:10px">Algoritmo con restricciones: evita cruces de docentes, aulas y secciones, respeta disponibilidad docente, horas semanales y recreos.</p>
+      <p class="muted" style="margin-bottom:10px">Valida restricciones de docentes, aulas, secciones, horas semanales y recreos. Solo publica si hay 0 conflictos.</p>
       <button class="btn" data-act="runScheduler">⚡ Generar y Publicar Horarios (28 Secciones)</button>
-      ${sched ? `<span class="chip ok" style="margin-left:10px">Última generación: ${sched.stats?.totalAssignedBlocks} bloques · ${sched.stats?.totalConflicts} conflictos</span>` : ""}
     </div>
-
     ${sched ? `
       <div class="row" style="align-items:center;margin:12px 0">
         <h3>Vista previa por sección:</h3>
@@ -633,19 +684,32 @@ function dirHorarios() {
 
 function dirPersonas() {
   return `
-    <h2>Gestión de Estudiantes y Docentes</h2>
-    <h3 class="sec">Docentes (${S.staff.length})</h3>
-    <div class="card tbl-wrap" style="margin-bottom:16px">
-      <table>
-        <thead><tr><th>Nombre</th><th>Correo</th><th>Área</th><th>Carga Máx.</th></tr></thead>
-        <tbody>${S.staff.map((t) => `<tr><td><b>${esc(t.name)}</b></td><td>${esc(t.email)}</td><td>${esc(t.areaName)}</td><td>${t.maxHours} h</td></tr>`).join("")}</tbody>
-      </table>
+    <h2>Gestión de Estudiantes y Personal</h2>
+    <div class="card" style="margin:12px 0">
+      <h3>Matricular Nuevo Estudiante</h3>
+      <form data-form="enrollStudent" class="row" style="align-items:end;margin-top:8px">
+        <label class="lbl">Nombre completo<input name="name" required placeholder="Apellidos y Nombres"></label>
+        <label class="lbl">Correo institucional<input name="email" type="email" required placeholder="alumno@colegio.edu.pe"></label>
+        <label class="lbl">Sección<select name="sectionId">${S.sections.map((s) => `<option value="${s.id}">${s.id}</option>`).join("")}</select></label>
+        <label class="lbl">Apoderado<input name="guardian" placeholder="Nombre y teléfono"></label>
+        <button class="btn" type="submit">Matricular</button>
+      </form>
     </div>
-    <h3 class="sec">Estudiantes Matriculados (${S.students.length})</h3>
     <div class="card tbl-wrap">
       <table>
-        <thead><tr><th>Código</th><th>Nombre</th><th>Sección</th><th>Apoderado</th></tr></thead>
-        <tbody>${S.students.map((s) => `<tr><td>${esc(s.code)}</td><td><b>${esc(s.name)}</b></td><td><span class="chip ok">${esc(s.sectionId)}</span></td><td class="muted">${esc(s.guardian || "—")}</td></tr>`).join("")}</tbody>
+        <thead><tr><th>Código</th><th>Nombre</th><th>Correo</th><th>Sección</th><th>Apoderado</th></tr></thead>
+        <tbody>${S.students.map((s) => `<tr><td>${esc(s.code)}</td><td><b>${esc(s.name)}</b></td><td>${esc(s.email)}</td><td><span class="chip ok">${esc(s.sectionId)}</span></td><td class="muted">${esc(s.guardian || "—")}</td></tr>`).join("")}</tbody>
+      </table>
+    </div>`;
+}
+
+function dirAuditoria() {
+  return `
+    <h2>Auditoría de Operaciones</h2>
+    <div class="card tbl-wrap" style="margin-top:12px">
+      <table>
+        <thead><tr><th>Fecha</th><th>Usuario</th><th>Rol</th><th>Acción</th><th>Detalle</th></tr></thead>
+        <tbody>${S.auditLogs.map((l) => `<tr><td>${esc(l.dateStr || "—")}</td><td>${esc(l.actorEmail)}</td><td><span class="chip">${esc(l.actorRole)}</span></td><td><b>${esc(l.action)}</b></td><td class="muted">${esc(l.target)}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">Sin registros de auditoría aún.</td></tr>`}</tbody>
       </table>
     </div>`;
 }
@@ -653,25 +717,30 @@ function dirPersonas() {
 /* ====================== PANEL DE SECRETARÍA ====================== */
 function secretariaView() {
   return ({
-    inicio: () => `<h2>Dirección / Secretaría</h2><div class="grid4" style="margin-top:12px"><div class="card kpi"><span class="muted">Estudiantes</span><b>${S.students.length}</b></div><div class="card kpi"><span class="muted">Secciones</span><b>${S.sections.length}</b></div><div class="card kpi"><span class="muted">Comunicados</span><b>${S.announcements.length}</b></div></div>`,
+    inicio: () => `<h2>Dirección / Secretaría</h2><div class="grid4" style="margin-top:12px"><div class="card kpi"><span class="muted">Estudiantes</span><b>${S.students.length}</b></div><div class="card kpi"><span class="muted">Secciones</span><b>${S.sections.length}</b></div><div class="card kpi"><span class="muted">Trámites</span><b>${S.tramites.length}</b></div></div>`,
     estudiantes: dirPersonas,
     conducta: () => `
-      <h2>Registro de Conducta (0–20 · DS N.º 021-2026-MINEDU)</h2>
+      <h2>Registro de Conducta (0–20)</h2>
       <div class="card" style="margin:12px 0">
         <form data-form="saveConduct" class="row" style="align-items:end">
           <label class="lbl">Alumno<select name="studentUid">${S.students.map((st) => `<option value="${st.uid}">${esc(st.name)} (${st.sectionId})</option>`).join("")}</select></label>
           <label class="lbl">Nota (0–20)<input name="score" type="number" min="0" max="20" required></label>
-          <label class="lbl">Observación descriptiva<input name="observation" required placeholder="Descripción de conducta o medida correctiva"></label>
+          <label class="lbl">Observación descriptiva<input name="observation" required></label>
           <button class="btn" type="submit">Registrar</button>
         </form>
       </div>
       <div class="stack">${S.conduct.map((c) => `<div class="card"><b>${esc(c.studentName)}</b> · <span class="chip">${c.score}/20</span><p class="muted">${esc(c.observation)}</p></div>`).join("")}</div>`,
+    tramites: () => `
+      <h2>Gestión de Trámites</h2>
+      <div class="stack" style="margin-top:12px">
+        ${S.tramites.map((t) => `<div class="card"><div class="row" style="align-items:center"><div><b>${esc(t.type)}</b> · ${esc(t.studentName)}<p class="muted">${esc(t.detail)}</p></div><button class="btn sm ok" data-act="approveTramite" data-id="${esc(t.id)}">Aprobar</button></div></div>`).join("") || `<div class="empty">No hay solicitudes de trámites.</div>`}
+      </div>`,
     comunicados: () => `
       <h2>Comunicados Institucionales</h2>
       <div class="card" style="margin:12px 0">
         <form data-form="saveAnn" class="stack">
-          <label class="lbl">Título<input name="title" required placeholder="Título del comunicado"></label>
-          <label class="lbl">Mensaje<textarea name="body" rows="3" required placeholder="Detalle para alumnos y padres"></textarea></label>
+          <label class="lbl">Título<input name="title" required></label>
+          <label class="lbl">Mensaje<textarea name="body" rows="3" required></textarea></label>
           <button class="btn" type="submit">Publicar comunicado</button>
         </form>
       </div>`,
@@ -691,43 +760,54 @@ function view() {
   return topbar() + nav() + `<main class="wrap">${body}</main>`;
 }
 
-function render() {
-  $app.innerHTML = view();
-}
-
 function closeModal() { $modal.innerHTML = ""; }
 
 const A = {
-  demo: (d) => data.loginDemo(d.role).then(() => toast(`Sesión iniciada como ${ROLE_LABEL[d.role]}`, "ok")),
+  demo: (d) => data.loginDemo(d.role).then(() => toast(`Sesión iniciada como ${ROLE_LABEL[d.role]}`, "ok")).catch((e) => toast(e.message, "bad")),
   login: () => data.login().catch((e) => toast(e.message, "bad")),
   logout: () => { data.logout(); toast("Sesión cerrada"); },
-  tab: (d) => { S.tab = d.t; render(); },
-  pickCourse: (d) => { S.selectedCourse = d.id; render(); },
+  resetPass: () => {
+    const email = prompt("Ingresa tu correo institucional para restablecer tu contraseña:");
+    if (!email) return;
+    data.resetPassword(email.trim()).then(() => toast("Revisa tu correo para restablecer la contraseña", "ok")).catch((e) => toast(e.message, "bad"));
+  },
+  tab: (d) => { S.tab = d.t; scheduleRender(); },
+  pickCourse: (d) => { S.selectedCourse = d.id; scheduleRender(); },
   closeModal,
   backdrop: (d, e) => { if (e.target === e.currentTarget) closeModal(); },
-  reqTramite: () => toast("Solicitud de constancia registrada en Secretaría", "ok"),
   toggleTramites: async () => {
-    const next = !S.schoolSettings.tramitesEnabled;
-    await data.set("settings", "school", { tramitesEnabled: next });
-    toast(next ? "Módulo de Trámites habilitado" : "Módulo de Trámites bloqueado", "ok");
+    try {
+      const next = !S.schoolSettings.tramitesEnabled;
+      await data.set("settings", "school", { tramitesEnabled: next });
+      await logAudit("TOGGLE_TRAMITES", `tramitesEnabled=${next}`);
+      toast(next ? "Módulo de Trámites habilitado" : "Módulo de Trámites bloqueado", "ok");
+    } catch (e) { toast(e.message, "bad"); }
+  },
+  approveTramite: async (d) => {
+    try {
+      await data.set("tramites", d.id, { status: "Aprobado" });
+      await logAudit("APPROVE_TRAMITE", d.id);
+      toast("Trámite aprobado", "ok");
+    } catch (e) { toast(e.message, "bad"); }
   },
   runScheduler: async () => {
-    const res = generateSmartSchedule({
-      sections: S.sections,
-      courses: S.courses,
-      teachers: S.staff,
-      cfg: CONFIG.scheduleDefaults,
-    });
-    await data.set("schedules", "published", res);
-    toast(`Horario generado para ${res.stats.totalSections} secciones (${res.stats.totalAssignedBlocks} bloques)`, "ok");
+    try {
+      const res = generateSmartSchedule({ sections: S.sections, courses: S.courses, teachers: S.staff, cfg: CONFIG.scheduleDefaults });
+      if (res.conflicts.length > 0) {
+        return toast(`No se publicó: se detectaron ${res.conflicts.length} conflictos de horario.`, "bad");
+      }
+      await data.set("schedules", "published", res);
+      await logAudit("PUBLISH_SCHEDULE", `${res.stats.totalAssignedBlocks} bloques en ${res.stats.totalSections} secciones`);
+      toast(`Horario validado (0 conflictos) y publicado para ${res.stats.totalSections} secciones`, "ok");
+    } catch (e) { toast(e.message, "bad"); }
   },
   openNewMod: () => {
     $modal.innerHTML = `<div class="backdrop" data-act="backdrop"><form class="sheet" data-form="newMod">
       <h3>Nuevo Módulo de Aprendizaje</h3>
       <label class="lbl">Curso<select name="courseId">${S.courses.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></label>
       <label class="lbl">Sección<select name="sectionId">${S.sections.map((s) => `<option value="${s.id}">${s.id}</option>`).join("")}</select></label>
-      <label class="lbl">Unidad<input name="unit" required placeholder="Ej. Unidad 2: Geometría"></label>
-      <label class="lbl">Semana<input name="week" type="number" min="1" max="40" value="2" required></label>
+      <label class="lbl">Unidad<input name="unit" required></label>
+      <label class="lbl">Semana<input name="week" type="number" min="1" max="40" value="1" required></label>
       <label class="lbl">Título<input name="title" required></label>
       <label class="lbl">Descripción<textarea name="description" rows="2" required></textarea></label>
       <div class="row"><button type="button" class="btn ghost" data-act="closeModal">Cancelar</button><button class="btn">Publicar</button></div>
@@ -748,7 +828,8 @@ const A = {
     const t = S.tasks.find((x) => x.id === d.id);
     $modal.innerHTML = `<div class="backdrop" data-act="backdrop"><form class="sheet" data-form="submitTask" data-id="${esc(d.id)}">
       <h3>Entregar: ${esc(t?.title || "")}</h3>
-      <label class="lbl">Respuesta escrita o enlace<textarea name="answer" rows="3" required placeholder="Escribe tu respuesta o pega el enlace de tu trabajo..."></textarea></label>
+      <label class="lbl">Respuesta escrita<textarea name="answer" rows="3" placeholder="Escribe tu respuesta..."></textarea></label>
+      <label class="lbl">Archivo adjunto (PDF/Imagen, máx 5 MB)<input name="file" type="file" accept=".pdf,image/*"></label>
       <div class="row"><button type="button" class="btn ghost" data-act="closeModal">Cancelar</button><button class="btn">Enviar Entrega</button></div>
     </form></div>`;
   },
@@ -785,9 +866,9 @@ document.addEventListener("change", (e) => {
   const el = e.target.closest("[data-change]");
   if (!el) return;
   const k = el.dataset.change;
-  if (k === "periodFilter") { S.periodFilter = el.value; render(); }
-  if (k === "selSection") { S.selectedSection = el.value; render(); }
-  if (k === "schedSection") { S.schedSection = el.value; render(); }
+  if (k === "periodFilter") { S.periodFilter = el.value; scheduleRender(); }
+  if (k === "selSection") { S.selectedSection = el.value; scheduleRender(); }
+  if (k === "schedSection") { S.schedSection = el.value; scheduleRender(); }
 });
 
 document.addEventListener("submit", async (e) => {
@@ -797,71 +878,95 @@ document.addEventListener("submit", async (e) => {
   const fd = new FormData(form);
   const f = form.dataset.form;
 
-  if (f === "emailAuth") {
-    const mode = e.submitter?.value || "login";
-    try {
+  try {
+    if (f === "emailAuth") {
+      const mode = e.submitter?.value || "login";
       if (mode === "register") await data.register(fd.get("email"), fd.get("password"), fd.get("email").split("@")[0]);
       else await data.loginEmail(fd.get("email"), fd.get("password"));
-    } catch (err) { toast(err.message, "bad"); }
-  } else if (f === "newMod") {
-    const c = S.courses.find((x) => x.id === fd.get("courseId"));
-    await data.set("modules", data.newId(), {
-      courseId: c.id, courseName: c.name, sectionId: fd.get("sectionId"),
-      unit: fd.get("unit"), week: Number(fd.get("week")), title: fd.get("title"),
-      description: fd.get("description"), published: true, createdAt: data.stamp(),
-    });
-    closeModal(); toast("Módulo publicado", "ok");
-  } else if (f === "newTask") {
-    const c = S.courses.find((x) => x.id === fd.get("courseId"));
-    await data.set("tasks", data.newId(), {
-      courseId: c.id, courseName: c.name, sectionId: fd.get("sectionId"),
-      title: fd.get("title"), instructions: fd.get("instructions"), dueDate: fd.get("dueDate"), maxScore: 20, createdAt: data.stamp(),
-    });
-    closeModal(); toast("Tarea creada", "ok");
-  } else if (f === "submitTask") {
-    const t = S.tasks.find((x) => x.id === form.dataset.id);
-    const stu = currentStudent();
-    await data.set("submissions", data.newId(), {
-      taskId: t.id, taskTitle: t.title, studentUid: stu.uid, studentName: stu.name,
-      answer: fd.get("answer"), status: "En revisión", createdAt: data.stamp(),
-    });
-    closeModal(); toast("Tarea entregada correctamente", "ok");
-  } else if (f === "gradeSub") {
-    const score = Number(fd.get("grade"));
-    if (score < 0 || score > 20) return toast("La nota debe estar entre 0 y 20", "bad");
-    await data.set("submissions", form.dataset.id, { grade: score, teacherComment: fd.get("teacherComment"), status: "Calificada" });
-    closeModal(); toast("Entrega calificada", "ok");
-  } else if (f === "saveGrade") {
-    const score = Number(fd.get("score"));
-    if (score < 0 || score > 20) return toast("La nota debe estar entre 0 y 20", "bad");
-    const c = S.courses.find((x) => x.id === fd.get("courseId"));
-    const st = S.students.find((x) => x.uid === fd.get("studentUid"));
-    await data.set("grades", data.newId(), {
-      studentUid: st.uid, studentName: st.name, sectionId: fd.get("sectionId"),
-      courseId: c.id, courseName: c.name, period: S.periodFilter, evalName: fd.get("evalName"),
-      category: "Evaluación", score, comment: fd.get("comment"), teacherName: S.user.name,
-    });
-    toast("Nota guardada (0–20)", "ok");
-  } else if (f === "saveAtt") {
-    const st = S.students.find((x) => x.uid === fd.get("studentUid"));
-    const date = fd.get("date");
-    const dup = S.attendance.some((a) => a.studentUid === st.uid && a.date === date);
-    if (dup) return toast("Ya existe asistencia registrada para este alumno en esa fecha", "bad");
-    await data.set("attendance", data.newId(), {
-      studentUid: st.uid, studentName: st.name, sectionId: fd.get("sectionId"), date, status: fd.get("status"),
-    });
-    toast("Asistencia registrada", "ok");
-  } else if (f === "saveConduct") {
-    const st = S.students.find((x) => x.uid === fd.get("studentUid"));
-    await data.set("conduct", data.newId(), {
-      studentUid: st.uid, studentName: st.name, sectionId: st.sectionId, period: "B1",
-      score: Number(fd.get("score")), observation: fd.get("observation"),
-    });
-    toast("Conducta registrada", "ok");
-  } else if (f === "saveAnn") {
-    await data.set("announcements", data.newId(), {
-      title: fd.get("title"), body: fd.get("body"), author: S.user.name, date: new Date().toISOString().slice(0, 10),
-    });
-    form.reset(); toast("Comunicado publicado", "ok");
+    } else if (f === "newMod") {
+      const c = S.courses.find((x) => x.id === fd.get("courseId"));
+      await data.set("modules", data.newId(), {
+        courseId: c.id, courseName: c.name, sectionId: fd.get("sectionId"),
+        unit: fd.get("unit"), week: Number(fd.get("week")), title: fd.get("title"),
+        description: fd.get("description"), published: true, createdAt: data.stamp(),
+      });
+      closeModal(); toast("Módulo publicado", "ok");
+    } else if (f === "newTask") {
+      const c = S.courses.find((x) => x.id === fd.get("courseId"));
+      await data.set("tasks", data.newId(), {
+        courseId: c.id, courseName: c.name, sectionId: fd.get("sectionId"),
+        title: fd.get("title"), instructions: fd.get("instructions"), dueDate: fd.get("dueDate"), maxScore: 20, createdAt: data.stamp(),
+      });
+      closeModal(); toast("Tarea creada", "ok");
+    } else if (f === "submitTask") {
+      const t = S.tasks.find((x) => x.id === form.dataset.id);
+      const stu = currentStudent();
+      const file = fd.get("file");
+      let fileUrl = "";
+      if (file && file.size > 0) fileUrl = await data.uploadFile(file, "submissions");
+      await data.set("submissions", data.newId(), {
+        taskId: t.id, taskTitle: t.title, studentUid: stu.uid, studentName: stu.name,
+        answer: fd.get("answer"), fileUrl, status: "En revisión", createdAt: data.stamp(),
+      });
+      closeModal(); toast("Tarea entregada correctamente", "ok");
+    } else if (f === "gradeSub") {
+      const score = Number(fd.get("grade"));
+      if (score < 0 || score > 20) return toast("La nota debe estar entre 0 y 20", "bad");
+      await data.set("submissions", form.dataset.id, { grade: score, teacherComment: fd.get("teacherComment"), status: "Calificada" });
+      closeModal(); toast("Entrega calificada", "ok");
+    } else if (f === "saveGrade") {
+      const score = Number(fd.get("score"));
+      if (score < 0 || score > 20) return toast("La nota debe estar entre 0 y 20", "bad");
+      const c = S.courses.find((x) => x.id === fd.get("courseId"));
+      const st = S.students.find((x) => x.uid === fd.get("studentUid"));
+      await data.set("grades", data.newId(), {
+        studentUid: st.uid, studentName: st.name, sectionId: fd.get("sectionId"),
+        courseId: c.id, courseName: c.name, period: S.periodFilter, evalName: fd.get("evalName"),
+        category: "Evaluación", score, comment: fd.get("comment"), teacherName: S.user.name,
+      });
+      toast("Nota guardada (0–20)", "ok");
+    } else if (f === "saveAtt") {
+      const st = S.students.find((x) => x.uid === fd.get("studentUid"));
+      const date = fd.get("date");
+      if (S.attendance.some((a) => a.studentUid === st.uid && a.date === date)) {
+        return toast("Ya existe asistencia registrada para este alumno en esa fecha", "bad");
+      }
+      await data.set("attendance", data.newId(), {
+        studentUid: st.uid, studentName: st.name, sectionId: fd.get("sectionId"), date, status: fd.get("status"),
+      });
+      toast("Asistencia registrada", "ok");
+    } else if (f === "saveConduct") {
+      const st = S.students.find((x) => x.uid === fd.get("studentUid"));
+      await data.set("conduct", data.newId(), {
+        studentUid: st.uid, studentName: st.name, sectionId: st.sectionId, period: "B1",
+        score: Number(fd.get("score")), observation: fd.get("observation"),
+      });
+      await logAudit("REGISTER_CONDUCT", `${st.name}: ${fd.get("score")}/20`);
+      toast("Conducta registrada", "ok");
+    } else if (f === "saveAnn") {
+      await data.set("announcements", data.newId(), {
+        title: fd.get("title"), body: fd.get("body"), author: S.user.name, date: new Date().toISOString().slice(0, 10),
+      });
+      await logAudit("PUBLISH_ANNOUNCEMENT", fd.get("title"));
+      form.reset(); toast("Comunicado publicado", "ok");
+    } else if (f === "enrollStudent") {
+      const secId = fd.get("sectionId");
+      const id = data.newId();
+      await data.set("students", id, {
+        uid: id, name: fd.get("name"), email: fd.get("email").toLowerCase(),
+        gradeId: secId[0], section: secId.slice(1), sectionId: secId,
+        guardian: fd.get("guardian"), code: `2027-${secId}-${String(S.students.length + 1).padStart(2, "0")}`, active: true,
+      });
+      await logAudit("ENROLL_STUDENT", `${fd.get("name")} -> ${secId}`);
+      form.reset(); toast("Estudiante matriculado", "ok");
+    } else if (f === "reqTramite") {
+      const stu = currentStudent();
+      await data.set("tramites", data.newId(), {
+        studentUid: stu.uid, studentName: stu.name, type: fd.get("type"), detail: fd.get("detail"), status: "Pendiente", createdAt: data.stamp(),
+      });
+      form.reset(); toast("Solicitud enviada a Secretaría", "ok");
+    }
+  } catch (err) {
+    toast(err.message || "Error al procesar la operación", "bad");
   }
 });
