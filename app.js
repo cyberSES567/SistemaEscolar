@@ -109,7 +109,7 @@ function startWatchers(role, u) {
 
   if (role === "alumno") {
     // Consultas estrictamente filtradas al alumno autenticado
-    w("students", "students", ["uid", u.uid]);
+    w("students", "students", ["email", (u.email || "").toLowerCase()]);
     w("modules", "modules");
     w("tasks", "tasks");
     w("submissions", "submissions", ["studentUid", u.uid]);
@@ -214,6 +214,25 @@ async function logAudit(action, target) {
 }
 
 /* ====================== helpers de dominio ====================== */
+function getSections() {
+  if (S.sections.length) return S.sections;
+  const list = [];
+  CONFIG.grades.forEach((g) => {
+    g.sections.forEach((sec) => {
+      list.push({ id: `${g.id}${sec}`, gradeId: g.id, gradeName: g.name, section: sec, room: `Aula ${g.id}0${sec.charCodeAt(0) - 64}` });
+    });
+  });
+  return list;
+}
+
+function getCourses() {
+  if (S.courses.length) return S.courses;
+  return CONFIG.mineduAreas.filter((a) => !a.optional).map((a) => ({
+    id: `cur-${a.id}`, areaId: a.id, name: a.name, hoursPerWeek: a.hoursPerWeek,
+    teacherEmail: "", teacherName: "Por asignar", competencies: a.competencies,
+  }));
+}
+
 function currentStudent() {
   return S.students.find((s) => s.uid === S.user?.uid || s.email === S.user?.email) || {
     uid: S.user?.uid, name: S.user?.name || "Estudiante", gradeId: "—", section: "—", sectionId: "Sin matrícula", code: "Pendiente"
@@ -683,14 +702,35 @@ function dirHorarios() {
 }
 
 function dirPersonas() {
+  const secs = getSections();
+  const courses = getCourses();
   return `
     <h2>Gestión de Estudiantes y Personal</h2>
+
+    <div class="card" style="margin:12px 0">
+      <h3>Agregar Personal (Profesor / Secretaría / Director)</h3>
+      <form data-form="addStaff" class="row" style="align-items:end;margin-top:8px">
+        <label class="lbl">Nombre completo<input name="name" required placeholder="Prof. Nombre Apellido"></label>
+        <label class="lbl">Correo institucional<input name="email" type="email" required placeholder="docente@colegio.edu.pe"></label>
+        <label class="lbl">Rol<select name="role"><option value="profesor">Profesor</option><option value="secretaria">Secretaría</option><option value="director">Director</option></select></label>
+        <label class="lbl">Área (si es Profesor)<select name="areaId">${courses.map((c) => `<option value="${esc(c.areaId)}">${esc(c.name)}</option>`).join("")}</select></label>
+        <button class="btn" type="submit">Agregar Personal</button>
+      </form>
+    </div>
+
+    <div class="card tbl-wrap" style="margin-bottom:16px">
+      <table>
+        <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Área</th><th>Estado</th></tr></thead>
+        <tbody>${S.staff.map((t) => `<tr><td><b>${esc(t.name)}</b></td><td>${esc(t.email)}</td><td><span class="chip">${esc(t.role)}</span></td><td class="muted">${esc(t.areaName || "—")}</td><td><span class="chip ok">${t.active !== false ? "Activo" : "Inactivo"}</span></td></tr>`).join("") || `<tr><td colspan="5" class="muted">Aún no hay personal registrado.</td></tr>`}</tbody>
+      </table>
+    </div>
+
     <div class="card" style="margin:12px 0">
       <h3>Matricular Nuevo Estudiante</h3>
       <form data-form="enrollStudent" class="row" style="align-items:end;margin-top:8px">
         <label class="lbl">Nombre completo<input name="name" required placeholder="Apellidos y Nombres"></label>
         <label class="lbl">Correo institucional<input name="email" type="email" required placeholder="alumno@colegio.edu.pe"></label>
-        <label class="lbl">Sección<select name="sectionId">${S.sections.map((s) => `<option value="${s.id}">${s.id}</option>`).join("")}</select></label>
+        <label class="lbl">Sección<select name="sectionId">${secs.map((s) => `<option value="${s.id}">${s.id}</option>`).join("")}</select></label>
         <label class="lbl">Apoderado<input name="guardian" placeholder="Nombre y teléfono"></label>
         <button class="btn" type="submit">Matricular</button>
       </form>
@@ -698,7 +738,7 @@ function dirPersonas() {
     <div class="card tbl-wrap">
       <table>
         <thead><tr><th>Código</th><th>Nombre</th><th>Correo</th><th>Sección</th><th>Apoderado</th></tr></thead>
-        <tbody>${S.students.map((s) => `<tr><td>${esc(s.code)}</td><td><b>${esc(s.name)}</b></td><td>${esc(s.email)}</td><td><span class="chip ok">${esc(s.sectionId)}</span></td><td class="muted">${esc(s.guardian || "—")}</td></tr>`).join("")}</tbody>
+        <tbody>${S.students.map((s) => `<tr><td>${esc(s.code)}</td><td><b>${esc(s.name)}</b></td><td>${esc(s.email)}</td><td><span class="chip ok">${esc(s.sectionId)}</span></td><td class="muted">${esc(s.guardian || "—")}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">Aún no hay estudiantes matriculados.</td></tr>`}</tbody>
       </table>
     </div>`;
 }
@@ -949,13 +989,27 @@ document.addEventListener("submit", async (e) => {
       });
       await logAudit("PUBLISH_ANNOUNCEMENT", fd.get("title"));
       form.reset(); toast("Comunicado publicado", "ok");
+    } else if (f === "addStaff") {
+      const email = fd.get("email").trim().toLowerCase();
+      const role = fd.get("role");
+      const areaId = fd.get("areaId");
+      const area = CONFIG.mineduAreas.find((a) => a.id === areaId);
+      await data.set("staff", email, {
+        email, name: fd.get("name").trim(), role,
+        areaId: role === "profesor" ? areaId : "",
+        areaName: role === "profesor" ? (area?.name || "") : "",
+        availability: [0, 1, 2, 3, 4], maxHours: 24, active: true,
+      });
+      await logAudit("ADD_STAFF", `${fd.get("name")} (${role})`);
+      form.reset(); toast("Personal agregado correctamente", "ok");
     } else if (f === "enrollStudent") {
       const secId = fd.get("sectionId");
+      if (!secId) return toast("Selecciona una sección válida", "bad");
       const id = data.newId();
       await data.set("students", id, {
-        uid: id, name: fd.get("name"), email: fd.get("email").toLowerCase(),
+        uid: id, name: fd.get("name").trim(), email: fd.get("email").trim().toLowerCase(),
         gradeId: secId[0], section: secId.slice(1), sectionId: secId,
-        guardian: fd.get("guardian"), code: `2027-${secId}-${String(S.students.length + 1).padStart(2, "0")}`, active: true,
+        guardian: fd.get("guardian").trim(), code: `2027-${secId}-${String(S.students.length + 1).padStart(2, "0")}`, active: true,
       });
       await logAudit("ENROLL_STUDENT", `${fd.get("name")} -> ${secId}`);
       form.reset(); toast("Estudiante matriculado", "ok");
