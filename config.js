@@ -183,15 +183,14 @@ export const CONFIG = {
 
   scheduleDefaults: {
     days: ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"],
-    shift: "manana", // "manana" (07:30 - 12:30) | "tarde" (12:30 - 18:30)
-    startTime: "07:30",
+    shift: "tarde",
+    startTime: "12:30",
     hourDurationMin: 45,
-    blocksPerDay: 6,
-    breakAfterBlock: 3,
-    breakDurationMin: 20,
+    blocksPerDay: 7,
+    breakAfterBlock: 4,
+    breakDurationMin: 25,
   },
   shifts: {
-    manana: { label: "Turno Mañana (07:30 – 12:30)", startTime: "07:30", hourDurationMin: 45, blocksPerDay: 6, breakAfterBlock: 3, breakDurationMin: 20 },
     tarde: { label: "Turno Tarde (12:30 – 18:30)", startTime: "12:30", hourDurationMin: 45, blocksPerDay: 7, breakAfterBlock: 4, breakDurationMin: 25 },
   },
 };

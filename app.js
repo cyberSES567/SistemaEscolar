@@ -55,7 +55,7 @@ const S = {
   selectedCourse: "",
   selectedSection: "3A",
   schedSection: "3A",
-  schedShift: "manana",
+  schedShift: "tarde",
 };
 
 let unsubs = [];
@@ -677,13 +677,11 @@ function dirHorarios() {
   return `
     <h2>Generador Inteligente de Horarios (28 Secciones)</h2>
     <div class="card" style="margin:12px 0">
-      <div class="row" style="align-items:end">
-        <label class="lbl" style="max-width:280px">Turno escolar
-          <select data-change="schedShift">
-            <option value="manana" ${S.schedShift === "manana" ? "selected" : ""}>${CONFIG.shifts.manana.label}</option>
-            <option value="tarde" ${S.schedShift === "tarde" ? "selected" : ""}>${CONFIG.shifts.tarde.label}</option>
-          </select>
-        </label>
+      <div class="row" style="align-items:center">
+        <div>
+          <b>Turno Tarde (12:30 – 18:30)</b>
+          <p class="muted">7 bloques pedagógicos de 45 min · Recreo de 25 min después del 4.º bloque.</p>
+        </div>
         <button class="btn" data-act="runScheduler">⚡ Generar y Publicar Horarios (28 Secciones)</button>
       </div>
     </div>

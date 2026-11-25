@@ -78,12 +78,13 @@ export function generateSmartSchedule({ sections, courses, teachers, cfg }) {
 
           for (const sl of classBlocks) {
             if (remaining <= 0) break;
-            const tKey = `${dIdx}-${sl.block}-${course.teacherEmail}`;
+            const hasTeacher = Boolean(course.teacherEmail);
+            const tKey = hasTeacher ? `${dIdx}-${sl.block}-${course.teacherEmail}` : null;
             const sKey = `${dIdx}-${sl.block}-${sec.id}`;
             const rKey = `${dIdx}-${sl.block}-${sec.room}`;
 
-            if (!teacherBusy.has(tKey) && !sectionBusy.has(sKey) && !roomBusy.has(rKey)) {
-              teacherBusy.add(tKey);
+            if ((!tKey || !teacherBusy.has(tKey)) && !sectionBusy.has(sKey) && !roomBusy.has(rKey)) {
+              if (tKey) teacherBusy.add(tKey);
               sectionBusy.add(sKey);
               roomBusy.add(rKey);
               entries.push({
