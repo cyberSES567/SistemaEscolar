@@ -55,6 +55,7 @@ const S = {
   selectedCourse: "",
   selectedSection: "3A",
   schedSection: "3A",
+  schedShift: "manana",
 };
 
 let unsubs = [];
@@ -670,18 +671,27 @@ function dirAcademico() {
 
 function dirHorarios() {
   const sched = publishedSchedule();
-  const { days, slots } = buildTimeSlots(CONFIG.scheduleDefaults);
+  const secs = getSections();
+  const shiftCfg = { ...CONFIG.scheduleDefaults, ...(CONFIG.shifts[S.schedShift] || {}) };
+  const { days, slots } = buildTimeSlots(shiftCfg);
   return `
     <h2>Generador Inteligente de Horarios (28 Secciones)</h2>
     <div class="card" style="margin:12px 0">
-      <p class="muted" style="margin-bottom:10px">Valida restricciones de docentes, aulas, secciones, horas semanales y recreos. Solo publica si hay 0 conflictos.</p>
-      <button class="btn" data-act="runScheduler">⚡ Generar y Publicar Horarios (28 Secciones)</button>
+      <div class="row" style="align-items:end">
+        <label class="lbl" style="max-width:280px">Turno escolar
+          <select data-change="schedShift">
+            <option value="manana" ${S.schedShift === "manana" ? "selected" : ""}>${CONFIG.shifts.manana.label}</option>
+            <option value="tarde" ${S.schedShift === "tarde" ? "selected" : ""}>${CONFIG.shifts.tarde.label}</option>
+          </select>
+        </label>
+        <button class="btn" data-act="runScheduler">⚡ Generar y Publicar Horarios (28 Secciones)</button>
+      </div>
     </div>
     ${sched ? `
       <div class="row" style="align-items:center;margin:12px 0">
         <h3>Vista previa por sección:</h3>
         <select data-change="schedSection" style="max-width:180px">
-          ${S.sections.map((s) => `<option value="${s.id}" ${S.schedSection === s.id ? "selected" : ""}>Sección ${s.id} (${s.room})</option>`).join("")}
+          ${secs.map((s) => `<option value="${s.id}" ${S.schedSection === s.id ? "selected" : ""}>Sección ${s.id} (${s.room})</option>`).join("")}
         </select>
       </div>
       <div class="card tbl-wrap">
@@ -832,12 +842,13 @@ const A = {
   },
   runScheduler: async () => {
     try {
-      const res = generateSmartSchedule({ sections: S.sections, courses: S.courses, teachers: S.staff, cfg: CONFIG.scheduleDefaults });
+      const shiftCfg = { ...CONFIG.scheduleDefaults, ...(CONFIG.shifts[S.schedShift] || {}) };
+      const res = generateSmartSchedule({ sections: getSections(), courses: getCourses(), teachers: S.staff, cfg: shiftCfg });
       if (res.conflicts.length > 0) {
         return toast(`No se publicó: se detectaron ${res.conflicts.length} conflictos de horario.`, "bad");
       }
       await data.set("schedules", "published", res);
-      await logAudit("PUBLISH_SCHEDULE", `${res.stats.totalAssignedBlocks} bloques en ${res.stats.totalSections} secciones`);
+      await logAudit("PUBLISH_SCHEDULE", `${res.stats.totalAssignedBlocks} bloques en ${res.stats.totalSections} secciones (${S.schedShift})`);
       toast(`Horario validado (0 conflictos) y publicado para ${res.stats.totalSections} secciones`, "ok");
     } catch (e) { toast(e.message, "bad"); }
   },
@@ -909,6 +920,7 @@ document.addEventListener("change", (e) => {
   if (k === "periodFilter") { S.periodFilter = el.value; scheduleRender(); }
   if (k === "selSection") { S.selectedSection = el.value; scheduleRender(); }
   if (k === "schedSection") { S.schedSection = el.value; scheduleRender(); }
+  if (k === "schedShift") { S.schedShift = el.value; scheduleRender(); }
 });
 
 document.addEventListener("submit", async (e) => {

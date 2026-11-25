@@ -49,6 +49,12 @@ service cloud.firestore {
       allow write: if isSecretaria();
     }
 
+    // Secciones (1.º a 5.º Secundaria)
+    match /sections/{id} {
+      allow read: if signedIn();
+      allow write: if isDirector();
+    }
+
     // Áreas curriculares, cursos y asignaciones docentes
     match /courses/{id} {
       allow read: if signedIn();
