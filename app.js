@@ -246,12 +246,12 @@ function loginView() {
   return `<header class="top">
     <div class="brand">Portal Colegio<small>${esc(CONFIG.schoolName)} · ${CONFIG.academicYear}</small></div>
     <div class="sp"></div>
-    <span class="chip ${dev ? "warn" : "ok"}">${dev ? "Entorno Desarrollo" : "Producción Firebase"}</span>
+    ${dev ? `<span class="chip warn">Modo Desarrollo</span>` : ""}
   </header>
   <section class="hero">
-    <span class="pill">SIGE Perú 2027 · Escala Vigesimal (0–20)</span>
+    <span class="pill">Portal Académico · Secundaria</span>
     <h1>Gestión Educativa Integral para Secundaria.</h1>
-    <p>Plataforma académica y administrativa conectada en tiempo real con Firebase Authentication, Cloud Firestore y Firebase Storage.</p>
+    <p>Accede a tus clases, horarios, calificaciones y comunicados institucionales desde un solo lugar.</p>
 
     ${dev ? `
       <div class="card" style="max-width:680px;margin:0 auto 22px;text-align:left">
@@ -266,7 +266,7 @@ function loginView() {
     ` : ""}
 
     <div class="card" style="max-width:440px;margin:0 auto;text-align:left">
-      <h3 style="margin-bottom:10px">Acceso institucional</h3>
+      <h3 style="margin-bottom:10px">Iniciar sesión</h3>
       ${isCloud ? `<button class="btn big gbtn full" data-act="login" style="margin-bottom:12px"><i>G</i> Continuar con Google</button>` : ""}
       <form data-form="emailAuth">
         <label class="lbl">Correo institucional<input name="email" type="email" required placeholder="usuario@colegio.edu.pe"></label>

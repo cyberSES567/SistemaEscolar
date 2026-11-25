@@ -4,13 +4,13 @@
 
 export const CONFIG = {
   firebase: {
-    apiKey: "AIzaSyA5rgccpD7TQe5_X-Bh0RvHDDhGCuBpGEc",
+    apiKey: "AIzaSyA5rgccpD7TQe5_X-Bh0RvhDDhGCuBpGEc",
     authDomain: "sistemaescolar-x.firebaseapp.com",
     projectId: "sistemaescolar-x",
     storageBucket: "sistemaescolar-x.firebasestorage.app",
     messagingSenderId: "675397683389",
     appId: "1:675397683389:web:a292ae32ea79e3a3a9cfd4",
-    measurementId: "G-BT-JXTP8LG8"
+    measurementId: "G-BTJXTP8LG8"
   },
 
   ownerEmail: "adminnegocio1923@gmail.com",
